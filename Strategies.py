@@ -24,15 +24,13 @@ never disagree.
 """
 
 """
-------------------------------------------------------------
-Functions below are for auxiliary purposes
-------------------------------------------------------------
+--------------------------------------------
+Supporting functions
+--------------------------------------------
 """
 from dataclasses import dataclass, field
-import random
-import warnings
 
-C, D = (1, 2)
+C, D = ("C", "D")
 moves = (C, D)
 
 def table_length(m):
@@ -44,26 +42,134 @@ def block_offset(k):
     # index of the first row of the block that uses k rounds of history
     return sum(4 ** j for j in range(k))
 
+def _pair_bits(own_move, opp_move):  # code actions of myself and opp into binary, C=0 and D=1
+    return (2 if own_move == "D" else 0) + (1 if opp_move == "D" else 0)
+
+def row_index(own_hist, opp_hist, m):
+    k = min(len(own_hist), m)
+    idx = 0
+    for j in range(len(own_hist) - k, len(own_hist)):
+        idx = idx * 4 + _pair_bits(own_hist[j], opp_hist[j])
+    return block_offset(k) + idx
+
+def decode_row(row, m):
+    # inverse of row_index: the (own, opp) history that a row stands for
+    k = 0
+    while row >= block_offset(k + 1):
+        k += 1
+    if k > m:
+        raise ValueError(f"row {row} does not exist for memory length {m}!")
+
+    idx = row - block_offset(k)
+    own, opp = [], []
+    for i in range(k):
+        divisor = 4 ** (k - 1 - i)
+        pair = idx // divisor
+        idx = idx % divisor
+        if pair == 0:    # 0 -> (C,C), defined in function _pair_bits
+            own.append(C)
+            opp.append(C)
+        elif pair == 1:  # 1 -> (C,D)
+            own.append(C)
+            opp.append(D)
+        elif pair == 2:  # 2 -> (D,C)
+            own.append(D)
+            opp.append(C)
+        else:            #3 -> (D,D)
+            own.append(D)
+            opp.append(D)
+    return tuple(own), tuple(opp)
+
+
+def next_move(table, own_hist, opp_hist):
+    # Move prescribed by a rule table, given both players' full histories
+    m = memory_of_length[len(table)]
+    return table[row_index(own_hist, opp_hist, m)]
+
+def build_table(rule, m = 2):
+    # Turn rule function into its rule table by enumerating all histories
+    rows = []
+    for row in range(table_length(m)):
+        own, opp = decode_row(row, m)  # change the row numbers into action history
+        move = rule(own, opp)
+        if move not in moves:
+            raise ValueError(f"rule returned {move} for history {own} / {opp}!")
+        rows.append(move)
+    return "".join(rows)
+
+def format_table(table):
+    m = memory_of_length[len(table)]
+    lines = []
+    for row, move in enumerate(table):
+        own, opp = decode_row(row, m)
+        history = " ".join(o + p for o, p in zip(own, opp)) or "start"
+        lines.append(f"{row:2d} {history:<7} -> {move}")
+
+    return "\n".join(lines)
+
 
 
 """
-------------------------------------------------------------
+-----------------------------------
 Strategy definition and functions
-------------------------------------------------------------
+-----------------------------------
+Reference Strategies
+"""
+
+@dataclass(frozen = True)
+class Strategy:
+    key: str
+    name: str
+    table: str
+    summary: str
+    traits: tuple = field(default = ())
+
+
+def make_strategy(key, name, rule, summary, traits = (), m = 2):
+    return Strategy(key, name, build_table(rule, m), summary, tuple(traits))
+
+def tft(own, opp):
+    return C if not opp else opp[-1]
+
+def allc(own, opp):
+    return C
+
+def alld(own, opp):
+    return D
+
+TFT = make_strategy(
+    "TFT", "Tit for Tat", tft,
+    "cooperates first, then copies the opponent's previous move",
+    ("nice", "retaliatory", "forgiving")
+)
+ALLC = make_strategy(
+    "ALLC", "Always cooperate", allc,
+    "Always cooperates",
+    ("nice", "forgiving")
+)
+ALLD = make_strategy(
+    "ALLD", "Always defect", alld,
+    "Always defects",
+    ("exploitative",)
+)
+
+
+"""
+Competitor strategies
 opp and own are 2 tuples restoring the latest 2 actions of myself and the opponent
     - len(opp) = 0 -> first round, no history
     - len(opp) = 1 -> opp = (C), own = (D)
     - len(opp) = 2 -> opp = (C,D), own = (D,D)
 (actions input are just for examples)
 """
-def lenient(opp):
+def lenient(own, opp):
     """
     1. Cooperate in the first 2 rounds
     retaliates only after 2 consecutive rounds of defection
     """
     if len(opp) < 2:
         return C
-    return D if opp[-1] == C and opp[-2] == D else C
+    return D if opp[-1] == D and opp[-2] == D else C
 
 def double_punisher(own, opp):
     """
@@ -91,13 +197,13 @@ def contrite(own, opp):
     of retaliating. This ends the C/D echo that locks two TFT players
     after a single defection.
     """
-    if not opp:
+    if not opp: # first round
         return C
-    if opp[-2] == C and own[-2] == D:
+    if len(opp) == 2 and own[-2] == D and opp[-2] == C and opp[-1] == D:
         return C
     return opp[-1]  # return to TFT
 
-def pavlov_2(own, opp):
+def pavlov2(own, opp):
     """
     4. Win-stay, lose shift with patience
 
@@ -131,12 +237,85 @@ def prober(own, opp):
       cooperation and fall back to TFT.
     - Otherwise play TFT
     """
-    if not opp: # first round
+    if not opp:
         return C
     if len(opp) == 1:
         return D
     if own[-1] == D and opp[-1] == C and opp[-2] == C:
         return D
-    if own[-1] == D and opp[-2] == C and opp[-1] == D:
+    if own[-2] == D and opp[-2] == C and opp[-1] == D:
         return C
     return opp[-1]
+
+# --------------------------------------------------------------------------
+# add your strategies at here
+# --------------------------------------------------------------------------
+
+
+LENIENT = make_strategy(
+    "LEN", "Lenient", lenient,
+    "Retaliates only after 2 consecutive defections",
+    ("nice", "retaliatory", "forgiving")
+)
+
+DOUBLE_PUNISHER = make_strategy(
+    "DPN", "Double Punisher", double_punisher,
+    "Defects twice after being exploited, once after mutual defection",
+    ("nice", "retaliatory", "forgiving")
+)
+
+CONTRITE = make_strategy(
+    "CTR", "Contrite", contrite,
+    "TFT, but accepts the retaliation provoked by its own defection",
+    ("nice", "retaliatory", "forgiving")
+)
+
+PAVLOV2 = make_strategy(
+    "PAV", "Pavlov-2", pavlov2,
+    "Keeps its move after a win (payoff = R or T), switches only after 2 consecutive losses",
+    ("nice", "retaliatory", "self-correcting")
+)
+
+PROBER = make_strategy(
+    "PRB", "Prober", prober,
+    "Tests the opponent in round 2 and exploits it if it does not react, otherwise apologize and play TFT",
+    ("exploitative", "retaliatory", "forgiving")
+)
+
+
+originals = [LENIENT, DOUBLE_PUNISHER, CONTRITE, PAVLOV2, PROBER]
+references = [TFT, ALLC, ALLD]
+fixed_field = originals + [TFT]  # once you update the 5 strategies of yours, you will see 10 strategies + TFT
+by_key = {s.key: s for s in originals + references}
+
+def get(key):
+    # look up a strategy by key
+    return by_key[key]
+
+def check_registry():
+    # check if 2 strategies share a key or a rule table
+    strategies = originals + references
+    keys = [s.key for s in strategies]
+    if len(set(keys)) != len(keys):
+        raise ValueError ("duplicate strategy keys")
+
+    seen = {}
+    for s in strategies:
+        if len(s.table) != table_length(2):
+            raise ValueError (f"{s.key}: table has {len(s.table)} rows, expected to be 21")
+        if s.table in seen:
+            raise ValueError (f"{s.key} has the same rule table as {seen[s.table]}")
+        seen[s.table] = s.key  # store the seen table and assigned to the strategy it belongs to
+
+check_registry()
+
+if __name__ == "__main__":
+    for m in (1, 2):
+        for row in range(table_length(m)):
+            own, opp = decode_row(row, m)
+            assert row_index(own, opp, m) == row
+            print("row -> history -> row round-trip check OK")
+    for s in fixed_field:
+        print(f"\n{s.key} {s.name} ({','.join(s.traits)})")
+        print(s.table)
+        print(format_table(s.table))
