@@ -6,7 +6,7 @@ has 1 + 4 + ... + 4**m rows (m = 1 -> 5 rows, m = 2 -> 21 rows):
 
     row 0       first move(no history)
     row 1..4    second move, indexed by round 1:         (own, opp)
-    row 5..20   round 3 onward, indexed by the last 2:   (own t-2, opp t-2, own t-1, own t-2)
+    row 5..20   round 3 onward, indexed by the last 2:   (own t-2, opp t-2, own t-1, opp t-1)
 
 Inside each block the history is read as a binary number with C = 0 and
 D = 1, oldest round first, own move before the opponent's move.
@@ -248,7 +248,71 @@ def prober(own, opp):
     return opp[-1]
 
 # --------------------------------------------------------------------------
-# add your strategies at here
+def _mutual_c(own, opp, i):
+    # True if both players cooperated in round i (negative index, e.g. -1 = last round)
+    return own[i] == C and opp[i] == C
+
+def _mutual_d(own, opp, i):
+    # True if both players defected in round i
+    return own[i] == D and opp[i] == D
+
+def suspicious(own, opp):
+    """
+    - Round 1: defect (hostile opening)
+    - Two rounds of mutual defection in a row -> cooperate once to break
+      the (D,D) lock
+    - Otherwise play TFT
+    """
+    if not opp:
+        return D
+    if len(opp) == 2 and _mutual_d(own, opp, -1) and _mutual_d(own, opp, -2):
+        return C
+    return opp[-1]
+
+def strict_mutualist(own, opp):
+    """
+    - Round 1: cooperate (no history yet)
+    - Round 2: only one round has been played, so that round alone must
+      be mutual cooperation (C,C)
+    - Round 3 onward: both of the last two rounds must be (C,C)
+    - Otherwise defect. 
+    """
+    if not opp:
+        return C
+    if len(opp) == 1:
+        return C if _mutual_c(own, opp, -1) else D
+    if _mutual_c(own, opp, -1) and _mutual_c(own, opp, -2):
+        return C
+    return D
+
+def two_round_grudger(own, opp):
+    """
+    - Round 1: cooperate
+    - Defect if the opponent defected at least once in the last two rounds,
+      otherwise cooperate
+    """
+    return D if D in opp else C
+
+def opportunist(own, opp):
+    """
+    - Round 1: cooperate
+    - After two rounds of mutual cooperation, defect once by surprise
+    - Otherwise play TFT
+    """
+    if not opp:
+        return C
+    if len(opp) == 2 and _mutual_c(own, opp, -1) and _mutual_c(own, opp, -2):
+        return D
+    return opp[-1]
+
+def contrarian(own, opp):
+    """
+    - Round 1: cooperate
+    - Afterwards: opponent C -> D, opponent D -> C
+    """
+    if not opp:
+        return C
+    return D if opp[-1] == C else C
 # --------------------------------------------------------------------------
 
 
@@ -282,8 +346,38 @@ PROBER = make_strategy(
     ("exploitative", "retaliatory", "forgiving")
 )
 
+SUSPICIOUS = make_strategy(
+    "SUS", "Suspicious", suspicious,
+    "Defects in round 1, then plays TFT; cooperates to break a deadlock after 2 rounds of mutual defection",
+    ("not nice", "retaliatory", "forgiving")
+)
 
-originals = [LENIENT, DOUBLE_PUNISHER, CONTRITE, PAVLOV2, PROBER]
+STRICT_MUTUALIST = make_strategy(
+    "SMU", "Strict Mutualist", strict_mutualist,
+    "Cooperates only if both players cooperated in both of the last 2 rounds",
+    ("nice", "retaliatory", "unforgiving")
+)
+
+TWO_ROUND_GRUDGER = make_strategy(
+    "GR2", "Two-round Grudger", two_round_grudger,
+    "Defects if the opponent defected at least once in the last 2 rounds",
+    ("nice", "strongly retaliatory")
+)
+
+OPPORTUNIST = make_strategy(
+    "OPT", "Opportunist", opportunist,
+    "After 2 rounds of mutual cooperation defects once by surprise, otherwise plays TFT",
+    ("nice opening", "exploitative")
+)
+
+CONTRARIAN = make_strategy(
+    "CRN", "Contrarian", contrarian,
+    "Plays the opposite of the opponent's last move",
+    ("control",)
+)
+
+originals = [LENIENT, DOUBLE_PUNISHER, CONTRITE, PAVLOV2, PROBER,
+             SUSPICIOUS, STRICT_MUTUALIST, TWO_ROUND_GRUDGER, OPPORTUNIST, CONTRARIAN]
 references = [TFT, ALLC, ALLD]
 fixed_field = originals + [TFT]  # once you update the 5 strategies of yours, you will see 10 strategies + TFT
 by_key = {s.key: s for s in originals + references}
