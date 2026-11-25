@@ -6,7 +6,7 @@ has 1 + 4 + ... + 4**m rows (m = 1 -> 5 rows, m = 2 -> 21 rows):
 
     row 0       first move(no history)
     row 1..4    second move, indexed by round 1:         (own, opp)
-    row 5..20   round 3 onward, indexed by the last 2:   (own t-2, opp t-2, own t-1, opt t-1)
+    row 5..20   round 3 onward, indexed by the last 2:   (own t-2, opp t-2, own t-1, opp t-1)
 
 Inside each block the history is read as a binary number with C = 0 and
 D = 1, oldest round first, own move before the opponent's move.
