@@ -247,7 +247,6 @@ def prober(own, opp):
         return C
     return opp[-1]
 
-# --------------------------------------------------------------------------
 def _mutual_c(own, opp, i):
     # True if both players cooperated in round i (negative index, e.g. -1 = last round)
     return own[i] == C and opp[i] == C
@@ -258,6 +257,7 @@ def _mutual_d(own, opp, i):
 
 def suspicious(own, opp):
     """
+    6.
     - Round 1: defect (hostile opening)
     - Two rounds of mutual defection in a row -> cooperate once to break
       the (D,D) lock
@@ -271,6 +271,7 @@ def suspicious(own, opp):
 
 def strict_mutualist(own, opp):
     """
+    7.
     - Round 1: cooperate (no history yet)
     - Round 2: only one round has been played, so that round alone must
       be mutual cooperation (C,C)
@@ -287,6 +288,7 @@ def strict_mutualist(own, opp):
 
 def two_round_grudger(own, opp):
     """
+    8.
     - Round 1: cooperate
     - Defect if the opponent defected at least once in the last two rounds,
       otherwise cooperate
@@ -295,6 +297,7 @@ def two_round_grudger(own, opp):
 
 def opportunist(own, opp):
     """
+    9.
     - Round 1: cooperate
     - After two rounds of mutual cooperation, defect once by surprise
     - Otherwise play TFT
@@ -307,14 +310,13 @@ def opportunist(own, opp):
 
 def contrarian(own, opp):
     """
+    10.
     - Round 1: cooperate
     - Afterwards: opponent C -> D, opponent D -> C
     """
     if not opp:
         return C
     return D if opp[-1] == C else C
-# --------------------------------------------------------------------------
-
 
 LENIENT = make_strategy(
     "LEN", "Lenient", lenient,
@@ -378,9 +380,17 @@ CONTRARIAN = make_strategy(
 
 originals = [LENIENT, DOUBLE_PUNISHER, CONTRITE, PAVLOV2, PROBER,
              SUSPICIOUS, STRICT_MUTUALIST, TWO_ROUND_GRUDGER, OPPORTUNIST, CONTRARIAN]
-references = [TFT, ALLC, ALLD]
-fixed_field = originals + [TFT]  # once you update the 5 strategies of yours, you will see 10 strategies + TFT
-by_key = {s.key: s for s in originals + references}
+
+# TFT is the benchmark and competes in the field.
+# ALLC and ALLD never compete; only used to verify the model (E0).
+# The lists do not overlap, so no strategy can appear twice when they are joined.
+benchmark = TFT
+references = [ALLC, ALLD]
+fixed_field = originals + [benchmark]  # the 10 originals + TFT, used in E1-E7
+
+# every strategy exactly once; use this for look-ups, menus (GUI) and checks
+all_strategies = fixed_field + references
+by_key = {s.key: s for s in all_strategies}
 
 def get(key):
     # look up a strategy by key
@@ -392,6 +402,13 @@ def check_registry():
     keys = [s.key for s in strategies]
     if len(set(keys)) != len(keys):
         raise ValueError ("duplicate strategy keys")
+
+    # the fixed field must hold every strategy once and contain the benchmark;
+    field_keys = [s.key for s in fixed_field]
+    if len(set(field_keys)) != len(field_keys):
+        raise ValueError ("fixed_field contains the same strategy twice")
+    if field_keys.count(benchmark.key) != 1:
+        raise ValueError (f"fixed_field must contain {benchmark.key} exactly once")
 
     seen = {}
     for s in strategies:
@@ -408,7 +425,7 @@ if __name__ == "__main__":
         for row in range(table_length(m)):
             own, opp = decode_row(row, m)
             assert row_index(own, opp, m) == row
-            print("row -> history -> row round-trip check OK")
+    print("row -> history -> row round-trip check OK")
     for s in fixed_field:
         print(f"\n{s.key} {s.name} ({','.join(s.traits)})")
         print(s.table)

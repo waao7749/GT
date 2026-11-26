@@ -121,6 +121,18 @@ def empty_matrix(n):
         matrix.append(row)
     return matrix
 
+def duplicate_tables(tables):
+    # index pairs (i, j) of tables that are identical,
+    # or a GA candidate that happens to equal a fixed strategy
+    seen = {}
+    pairs = []
+    for i, t in enumerate(tables):
+        if t in seen:
+            pairs.append((seen[t], i))
+        else:
+            seen[t] = i
+    return pairs
+
 def tournament(tables, rounds = 200, payoffs = None, noise = 0.0, repeats = None, seed = None):
     """Round-robin tournament between rule tables, including self-play.
 
@@ -166,7 +178,7 @@ def tournament(tables, rounds = 200, payoffs = None, noise = 0.0, repeats = None
             if i == j:
                 # self-playL both players are the same strategy, so its score is the average of 2 sides
                 A[i][i] = (sum_i + sum_j) / (2 * repeats)
-                mutual[i][i] = sum_mutual / (2 * repeats)
+                mutual[i][i] = sum_mutual / repeats
                 coop[i][i] = (sum_coop_i + sum_coop_j) / (2 * repeats)
             else:
                 A[i][j] = sum_i / repeats
@@ -202,7 +214,7 @@ def ranking(names, scores):
     pairs = []
     for i in range(len(names)):
         pairs.append((names[i], scores[i]))
-    pairs.sort(reverse = True)
+    pairs.sort(key = lambda pair: pair[1], reverse = True)   # sort by score, not name
 
     result = []
     rank = 1
@@ -305,7 +317,9 @@ if __name__ == "__main__":
     for s in field:
         names.append(s.key)
         tables.append(s.table)
-
+    # every strategy, including the benchmark TFT, must be in the field exactly once
+    assert not duplicate_tables(tables), f"duplicate strategies in the field: {duplicate_tables(tables)}"
+    
     # little check for E0
     allc = Strategies.ALLC.table
     alld = Strategies.ALLD.table

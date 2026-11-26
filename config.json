@@ -1,0 +1,69 @@
+{
+  "_todo": [
+    "Every value needs a literature source in section c (Tuning).",
+    "From the assignment PDF: payoffs = Table 2 (Axelrod & Hamilton 1981), rounds = 200 (Axelrod's tournament), GA population 20 and top 10 selected for crossover (PDF example).",
+    "Team choices that still need a source: noise 0, memory 2, replicator tolerance and max_generations, ga mutation_rate / n_elites / patience, all experiment value lists.",
+    "Self-play is included in rankings: Axelrod (1980) paired each entry with its own twin."
+  ],
+
+  "seed": 2026,
+
+  "strategy": {
+    "memory": 2
+  },
+
+  "game": {
+    "rounds": 200,
+    "payoffs": {"T": 5, "R": 3, "P": 1, "S": 0},
+    "noise": 0.0
+  },
+
+  "tournament": {
+    "repeats": null
+  },
+
+  "ranking": {
+    "include_self": true
+  },
+
+  "replicator": {
+    "x0": null,
+    "max_generations": 2000,
+    "tolerance": 1e-8
+  },
+
+  "ga": {
+    "pop_size": 20,
+    "selection_share": 0.5,
+    "n_elites": 2,
+    "crossover": "half",
+    "mutation_rate": 0.05,
+    "max_generations": 200,
+    "patience": 30,
+    "tolerance": 1e-6,
+    "n_runs": 10
+  },
+
+  "experiments": {
+    "E0": {},
+    "E1": {},
+    "E2": {"rounds_values": [1, 2, 5, 10, 20, 50, 100, 200, 500]},
+    "E3": {"R": 1, "P": 0, "T_range": [0, 2], "S_range": [-1, 1], "steps": 21},
+    "E4": {"noise_values": [0.0, 0.01, 0.02, 0.05, 0.1], "repeats": 30},
+    "E5": {"n_random_starts": 20},
+    "E6": {
+      "invader_share": 0.01,
+      "n_random_opponents": 200,
+      "n_random_starts": 50,
+      "survival_threshold": 0.01,
+      "tie_tolerance": 1e-9
+    },
+    "E7": {"check_memory1_exhaustive": true, "memory1_runs": 5}
+  },
+
+  "figures": {
+    "out_dir": "figures",
+    "dpi": 300,
+    "colors": {"TFT": "black"}
+  }
+}
