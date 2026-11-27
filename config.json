@@ -28,70 +28,47 @@
 
   "replicator": {
     "x0": null,
-    "max_generations": 2000,
+    "max_generations": 20000,
     "tolerance": 1e-8
   },
 
   "ga": {
     "pop_size": 20,
     "selection_share": 0.5,
-    "n_elites": 2,
+    "n_elites": 1,
     "crossover": "half",
-    "mutation_rate": 0.05,
-    "max_generations": 200,
-    "patience": 30,
+    "mutation_rate": 0.0476,
+    "max_generations": 20000,
+    "patience": 100,
     "tolerance": 1e-6,
-    "n_runs": 10
+    "n_runs": 40
   },
 
   "experiments": {
-    "E0": {},
     "E1": {},
     "E2": {"rounds_values": [1, 2, 3, 5, 10, 20, 50, 100, 200, 500, 1000], "survival_threshold": 1e-3},
     "E3": {
-      "T_range": [
-        0.0,
-        2.0
-      ],
-      "S_range": [
-        -1.0,
-        1.0
-      ],
+      "T_range": [0.0, 2.0],
+      "S_range": [-1.0, 1.0],
       "steps": 21,
       "survival_threshold": 1e-3,
       "named_payoffs": {
-        "Axelrod": {
-          "T": 5,
-          "R": 3,
-          "P": 1,
-          "S": 0
-        },
-        "Phage phi6": {
-          "T": 1.99,
-          "R": 1.0,
-          "P": 0.83,
-          "S": 0.65
-        },
-        "Prison years": {
-          "T": 0,
-          "R": -1,
-          "P": -2,
-          "S": -3
-        }
+        "Axelrod":      {"T": 5,    "R": 3,   "P": 1,    "S": 0},
+        "Phage phi6":   {"T": 1.99, "R": 1.0, "P": 0.83, "S": 0.65},
+        "Prison years": {"T": 0,    "R": -1,  "P": -2,   "S": -3}
       }
     },
-    "E4": {"noise_values": [0.0, 0.01, 0.02, 0.05, 0.1], "repeats": 30},
-    "E5": {"n_random_starts": 20},
-    "E6": {
+    "E4": {"n_random_starts": 20},
+    "E5": {
       "invader_share": 0.01,
       "n_random_opponents": 200,
       "n_random_starts": 50,
       "survival_threshold": 0.01,
       "tie_tolerance": 1e-9
     },
-    "E7": {"check_memory1_exhaustive": true, "memory1_runs": 5}
+    "E6": {"check_memory1_exhaustive": true, "memory1_runs": 5}
   },
-
+  
   "figures": {
     "out_dir": "figures",
     "dpi": 300,

@@ -3,6 +3,8 @@ one command produces every figure in the report, with fixed random seeds, writte
 """
 import experiments
 import sys
+import Strategies
+import model
 from pathlib import Path
 
 CONFIG_PATH = Path(__file__).with_name("config.json")
@@ -112,25 +114,128 @@ def fig_E3_named(data, ax, cfg):
 
 
 # ------------------------------------------
+# E4 fig
+# ------------------------------------------
+# Shared colours
+NICE_COLOR, OTHER_COLOR = "#257de0", "#f47230"
+TEXT, MUTED = "#191919", "#666666"
+
+
+def is_nice(key):
+    return "nice" in Strategies.get(key).traits
+
+
+def clean_axes(ax):
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    ax.grid(axis="y", color="#e6e6e6", linewidth=0.6)
+    ax.set_axisbelow(True)
+    ax.tick_params(colors=MUTED, labelsize=8)
+
+
+def spread_labels(values, min_gap):
+    order = sorted(range(len(values)), key=lambda i: values[i])
+    placed = list(values)
+
+    for a, b in zip(order, order[1:]):
+        placed[b] = max(placed[b], placed[a] + min_gap)
+
+    return placed
+
+
+def fig_E4(data, ax, cfg):
+    history = data["uniform"]["history"]
+    keys = data["keys"]
+    gens = range(len(history))
+    final = history[-1]
+
+    # Plot strategy populations
+    for i, key in enumerate(keys):
+        nice = is_nice(key)
+        color = "black" if key == "TFT" else NICE_COLOR if nice else OTHER_COLOR
+
+        ax.plot(gens, [h[i] for h in history], color=color,
+                linewidth=2.0 if key == "TFT" else 1.4,
+                linestyle="-" if nice else "--")
+
+    # Label surviving and extinct strategies
+    alive = [i for i, v in enumerate(final) if v > 0.01]
+
+    for i, y in zip(alive, spread_labels([final[i] for i in alive], 0.012)):
+        ax.text(len(history) + 1, y, f"{keys[i]} {final[i]:.3f}",
+                fontsize=7, color=TEXT, va="center")
+
+    gone = ", ".join(k for k, v in zip(keys, final) if v <= 0.01)
+    ax.text(len(history) + 1, 0, f"extinct: {gone}",
+            fontsize=7, color=MUTED, va="bottom")
+
+    # Mark convergence
+    g = data["uniform"]["generations"]
+    ax.axvline(g, color=MUTED, linestyle=":", linewidth=0.8)
+    ax.text(g, 0.03, f"converged\n(gen {g})", fontsize=7,
+            color=MUTED, ha="right", va="bottom")
+
+    # Legend
+    ax.plot([], [], color=NICE_COLOR, label="nice strategies")
+    ax.plot([], [], color="black", linewidth=2, label="TFT (benchmark)")
+    ax.plot([], [], color=OTHER_COLOR, linestyle="--", label="non-nice strategies")
+    ax.legend(fontsize=7, frameon=False, loc="center", bbox_to_anchor=(0.45, 0.25))
+
+    ax.set(xlim=(0, len(history) * 1.25),
+           xlabel="generation", ylabel="population share",
+           title="E4: replicator dynamics from a uniform start")
+
+    clean_axes(ax)
+
+
+def fig_E4_steady_states(data, ax, cfg):
+    from matplotlib.patches import Patch
+
+    keys = data["keys"]
+    runs = [("U", data["uniform"]["history"][-1])]
+    runs += [(str(n), r["final"]) for n, r in enumerate(data["random_runs"], 1)]
+
+    # Group nice-only states first
+    runs.sort(key=lambda r: any(v > 0.01 for k, v in zip(keys, r[1]) if not is_nice(k)))
+    # Plot steady states
+    for x, (_, final) in enumerate(runs):
+        bottom = 0
+
+        for k, v in sorted(zip(keys, final), key=lambda r: -r[1]):
+            if v < 0.005:
+                continue
+
+            ax.bar(x, v, bottom=bottom, width=0.8,
+                   color=NICE_COLOR if is_nice(k) else OTHER_COLOR,
+                   edgecolor="white", linewidth=1)
+
+            if v >= 0.12:
+                ax.text(x, bottom + v / 2, k, fontsize=5.5,
+                        color="white", ha="center", va="center", rotation=90)
+
+            bottom += v
+
+    ax.set(xticks=range(len(runs)),
+           xticklabels=[name for name, _ in runs],
+           ylim=(0, 1))
+    ax.set_xlabel("start (U = uniform, 1-20 = random)", fontsize=8, color=MUTED)
+    ax.set_ylabel("share in steady state", fontsize=8, color=MUTED)
+    ax.set_title("E4: steady state reached from each start",
+                 fontsize=9, color=TEXT, loc="left")
+
+    ax.legend(handles=[
+        Patch(color=NICE_COLOR, label="nice strategy"),
+        Patch(color=OTHER_COLOR, label="non-nice strategy")
+    ], fontsize=7, frameon=False, loc="lower right",
+       bbox_to_anchor=(1, 1.0), ncol=2)
+
+    clean_axes(ax)
+
+
+# ------------------------------------------
 # E5 fig
 # ------------------------------------------
 def fig_E5(data, ax, cfg):
-    # shares over the generations from the uniform start
-    colors = experiments.strategy_colors(data["keys"], cfg)
-    history = data["uniform"]["history"]
-    for i, key in enumerate(data["keys"]):
-        ax.plot([x[i] for x in history], label=key, color=colors[key],
-                linewidth=2.2 if key == "TFT" else 1.4)
-    ax.set_xlabel("generation")
-    ax.set_ylabel("population share")
-    ax.set_title("E5: replicator dynamics from a uniform start")
-    ax.legend(ncol=2, fontsize=8, frameon=False)
-
-
-# ------------------------------------------
-# E6 fig
-# ------------------------------------------
-def fig_E6(data, ax, cfg):
     # one panel: survival frequency (robustness) against growth when rare (viability)
     colors = experiments.strategy_colors(data["keys"], cfg)
     for key in data["keys"]:
@@ -139,27 +244,105 @@ def fig_E6(data, ax, cfg):
         ax.scatter(x, y, color=colors[key], s=40)
         ax.annotate(key, (x, y), textcoords="offset points", xytext=(4, 3), fontsize=8)
     ax.axvline(1.0, color="grey", linewidth=0.8, linestyle="--")
-    ax.set_xlabel("growth factor when rare (initial viability)")
-    ax.set_ylabel("share of random starts survived (robustness)")
-    ax.set_title("E6: viability and robustness")
+    ax.set_xlabel("growth factor when rare")
+    ax.set_ylabel("share of random starts survived")
+    ax.set_title("E5: viability and robustness")
 
 
 # ------------------------------------------
-# E7 fig
+# E6 fig
 # ------------------------------------------
-def fig_E7(data, ax, cfg):
-    # best and mean fitness per generation for every run
-    for k, run in enumerate(data["runs"]):
-        gens = [h["generation"] for h in run["history"]]
-        ax.plot(gens, [h["best"] for h in run["history"]], color="tab:blue", alpha=0.6,
-                linewidth=1, label="best" if k == 0 else None)
-        ax.plot(gens, [h["mean"] for h in run["history"]], color="tab:orange", alpha=0.4,
-                linewidth=1, label="mean" if k == 0 else None)
-    ax.set_xlabel("generation")
-    ax.set_ylabel("fitness (score per round vs fixed field)")
-    ax.set_title(f"E7: genetic algorithm, {len(data['runs'])} runs")
-    ax.legend(frameon=False)
 
+def fig_E6(data, ax, cfg):
+    import GA
+
+    histories = [r["history"] for r in data["runs"]]
+    length = min(max(len(h) for h in histories), 101)
+
+    best = []
+    mean = []
+
+    for i in range(length):
+        best.append(sorted(h[min(i, len(h)-1)]["best"] for h in histories))
+        mean.append(sorted(h[min(i, len(h)-1)]["mean"] for h in histories))
+
+    gens = range(length)
+    mid = len(histories) // 2
+
+    ax.fill_between(gens, [x[0] for x in best], [x[-1] for x in best], color=NICE_COLOR, alpha=0.15)
+    ax.plot(gens, [x[mid] for x in best], color=NICE_COLOR,
+            label=f"best in population (median, {len(histories)} runs)")
+    ax.plot(gens, [x[mid] for x in mean], color=OTHER_COLOR,
+            label="population mean (median)")
+
+    field = [s.table for s in Strategies.fixed_field]
+
+    for key in ("PAV", "TFT"):
+        fitness = GA.candidate_fitness(
+            Strategies.get(key).table, field,
+            cfg["game"], cfg["ranking"]["include_self"]
+        )
+        ax.hlines(fitness, 0, length-1, color=MUTED, linestyle=":")
+        ax.text(length-1, fitness, f" {key} ({fitness:.3f})",
+                fontsize=7, color=MUTED, va="center")
+
+    ax.text(length-1, data["best_fitness"],
+            f" evolved strategy ({data['best_fitness']:.3f})",
+            fontsize=7, color=TEXT, va="center")
+
+    ax.set(
+        xlim=(0, length * 1.5),
+        xlabel="generation",
+        ylabel="fitness (score per round)",
+        title="E6: genetic algorithm"
+    )
+
+    ax.legend(fontsize=7, frameon=False, loc="lower right")
+    clean_axes(ax)
+
+
+def fig_E6_advantage(data, ax, cfg):
+    game = cfg["game"]
+    rows = []
+
+    for opp in Strategies.fixed_field + [Strategies.ALLD]:
+        ga = model.play_match(data["best_table"], opp.table,game["rounds"], game["payoffs"])["score_a"]
+        pav = model.play_match(
+            Strategies.PAVLOV2.table, opp.table, game["rounds"], game["payoffs"])["score_a"]
+        rows.append((opp.key, ga - pav))
+
+    alld = next(r for r in rows if r[0] == "ALLD")
+    rows = [alld] + sorted([r for r in rows if r[0] != "ALLD"],key=lambda r: r[1])
+
+    for y, (key, diff) in enumerate(rows):
+        color = OTHER_COLOR if key == "ALLD" else NICE_COLOR
+        ax.barh(y, diff, height=0.6, color=color)
+
+        if abs(diff) < 1e-9:
+            ax.text(0, y, " same score", fontsize=7, color=TEXT, va="center")
+        elif diff > 0:
+            ax.text(diff, y, f" {diff:+.3f}", fontsize=7, color=TEXT, va="center")
+        else:
+            # negative bar: label on the left end of the bar
+            ax.text(diff, y, f"{diff:+.3f} ", fontsize=7, color=TEXT, va="center", ha="right")
+
+    ax.set_yticks(range(len(rows)))
+    ax.set_yticklabels([k + (" (not in field)" if k == "ALLD" else "") for k, _ in rows])
+    ax.axvline(0, color=MUTED, linewidth=0.8)
+    ax.set(
+        xlabel="score per round: evolved strategy minus PAV",
+        title="E6: where the evolved strategy beats PAV"
+    )
+    # room for positive and negative bars plus their labels
+    lo = min(0, min(d for _, d in rows))
+    hi = max(0, max(d for _, d in rows))
+    pad = 0.3 * (hi - lo)
+    ax.set_xlim(lo - pad if lo < 0 else 0, hi + pad)
+
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+
+    ax.tick_params(colors=MUTED, labelsize=7)
 
 # ------------------------------------------
 # Command line
@@ -215,34 +398,115 @@ def report_E3(data):
               f"top 3: {top:16s} tau={d['tau_vs_reference']:.2f}  "
               f"stable coop={d['population']['cooperation']:.3f}")
 
-def report_E5(data):
+def report_E4(data):
     u = data["uniform"]
-    print(f"E5 uniform start: converged = {u['converged']} after {u['generations']} generations")
-    for key, share in zip(data["keys"], u["history"][-1]):
-        print(f"   {key:4s} {share:.3f}")
-    print(f"   population mutual cooperation: {u['cooperation'][-1]:.3f}")
-    not_conv = sum(not r["converged"] for r in data["random_runs"])
-    print(f"   random starts: {len(data['random_runs'])} runs, {not_conv} did not converge")
+    keys = data["keys"]
+    runs = data["random_runs"]
 
-def report_E6(data):
-    print("E6  key  growth(field) growth(ALLD) vsRandom survived rank   resisted/neutral/invaded")
+    def present(shares, digits):
+        # strategies still present (share > 1%)
+        return ", ".join(f"{k} {v:.{digits}f}" for k, v in zip(keys, shares) if v > 0.01)
+
+    # uniform start
+    status = "converged" if u["converged"] else "NOT converged"
+    print(f"E4 uniform start: {status} after {u['generations']} generations, "
+          f"mutual cooperation {u['cooperation'][-1]:.3f}")
+    print("   steady state:", present(u["history"][-1], 3))
+
+    # random starts
+    print(f"   random starts: {len(runs)} runs, {sum(not r['converged'] for r in runs)} did not converge")
+    print("   survived (share > 1%):",
+          ", ".join(f"{k} {sum(r['final'][i] > 0.01 for r in runs)}" for i, k in enumerate(keys)),
+          f"(out of {len(runs)})")
+    for r in runs:
+        if any(r["final"][i] > 0.01 for i, k in enumerate(keys) if "nice" not in Strategies.get(k).traits):
+            print("   other steady state:", present(r["final"], 2))
+
+def print_table(headers, rows, indent="    "):
+    table = [headers] + [[str(x) for x in row] for row in rows]
+    widths = [max(len(row[c]) for row in table) for c in range(len(headers))]
+    for row in table:
+        print(indent + "  ".join(cell.rjust(w) for cell, w in zip(row, widths)))
+
+def report_E5(data):
+    print("E5 initial viability, robustness and stability")
+    headers = ["key", "Growth(field)", "Growth(ALLD)", "vsRandomOpp",
+               "Survived", "Rank_range", "Resisted/neutral/invaded"]
+    rows = []
     for key in data["keys"]:
         v, a = data["viability_field"][key], data["viability_alld"][key]
         r, s = data["robustness"][key], data["stability"][key]
-        print(f"    {key:4s} {v['growth']:.3f}         {a['growth']:.3f}        "
-              f"{r['vs_random_tables']:.3f}    {r['survived']:2d}/{data['n_random_starts']}  "
-              f"{r['rank_best']}-{r['rank_worst']}  "
-              f"{len(s['resisted'])}/{len(s['neutral'])}/{len(s['invaded_by'])}")
+        rows.append([key,
+                     f"{v['growth']:.3f}",
+                     f"{a['growth']:.3f}",
+                     f"{r['vs_random_tables']:.3f}",
+                     f"{r['survived']}/{data['n_random_starts']}",
+                     f"{r['rank_best']}-{r['rank_worst']}",
+                     f"{len(s['resisted'])}/{len(s['neutral'])}/{len(s['invaded_by'])}"])
+    print_table(headers, rows)
+            
+def used_rows(table, opponents, rounds):
+    # rule-table rows that are actually looked up when `table` plays each opponent
+    used = set()
+    for opp in opponents:
+        own, other = [], []
+        for _ in range(rounds):
+            used.add(Strategies.row_index(own, other, 2))
+            a = Strategies.next_move(table, own, other)
+            b = Strategies.next_move(opp, other, own)
+            own.append(a)
+            other.append(b)
+    return used
 
-def report_E7(data):
-    print(f"E7 best table {data['best_table']}  fitness {data['best_fitness']:.3f}  "
-          f"(same as a field strategy: {data['equals_field_strategy']})")
+def report_E6(data):
+    cfg = experiments.load_config()
+    game = cfg["game"]
+    runs = data["runs"]
+    field = [s.table for s in Strategies.fixed_field]
+
+    # 1. the GA runs and the best strategy
+    fits = [r["best_fitness"] for r in runs]
+    mean = sum(fits) / len(fits)
+    sd = (sum((f - mean) ** 2 for f in fits) / len(fits)) ** 0.5
+    reached = sum(abs(f - data["best_fitness"]) < 1e-9 for f in fits)
+    print(f"E6 {len(runs)} GA runs: best fitness mean {mean:.3f}, sd {sd:.3f}, "
+          f"{reached} runs reached {data['best_fitness']:.3f}, "
+          f"{sum(r['converged'] for r in runs)} converged")
+    print(f"   best table {data['best_table']}  (same as a field strategy: {data['equals_field_strategy']})")
     for rank, name, score in data["ranking"][:5]:
         print(f"   {rank:2d}. {name:4s} {score:.3f}")
     print(f"   final share of GA strategy: {data['final_shares']['GA']:.3f}")
+
+    # 2. where the GA strategy gains: score per round against every opponent, next to PAV
+    rows = []
+    for opp in Strategies.fixed_field + [Strategies.ALLD]:
+        ga = model.play_match(data["best_table"], opp.table, game["rounds"], game["payoffs"])["score_a"]
+        pav = model.play_match(Strategies.PAVLOV2.table, opp.table, game["rounds"], game["payoffs"])["score_a"]
+        rows.append([opp.key, f"{ga:.3f}", f"{pav:.3f}", f"{ga - pav:+.3f}"])
+    print("   score per round against each opponent (ALLD is not in the field):")
+    print_table(["opponent", "GA", "PAV", "GA - PAV"], rows, indent="      ")
+
+    # 3. different tables with the same best fitness: they differ only in rows never used
+    #    against the field, which still change their score against an outside opponent (ALLD)
+    tops = sorted({r["best_table"] for r in runs if abs(r["best_fitness"] - data["best_fitness"]) < 1e-9})
+    unused = set(range(len(data["best_table"])))
+    for t in tops:
+        unused -= used_rows(t, field + [t], game["rounds"])
+    differ = [i for i in range(len(tops[0])) if len({t[i] for t in tops}) > 1]
+    print(f"   {len(tops)} different tables reach the best fitness; they differ in rows {differ}")
+    print(f"   rows never used against the field: {sorted(unused)}")
+    vs_alld = {}
+    for t in tops:
+        score = round(model.play_match(t, Strategies.ALLD.table, game["rounds"], game["payoffs"])["score_a"], 3)
+        vs_alld[score] = vs_alld.get(score, 0) + 1
+    print("   their score against ALLD:", ", ".join(f"{sc:.3f} ({n} tables)" for sc, n in sorted(vs_alld.items())))
+
+    # 4. validation with memory 1
     if "memory1_check" in data:
         m1 = data["memory1_check"]
-        print(f"   memory-1 check passed = {m1['passed']}  exhaustive best {m1['exhaustive_best']}")
+        print(f"   memory-1 check passed = {m1['passed']}")
+        print("   best memory-1 tables (exhaustive):",
+              ", ".join(f"{t} {f:.3f}" for f, t in m1["exhaustive_top3"]))
 
 
 if __name__ == "__main__":
@@ -252,9 +516,9 @@ if __name__ == "__main__":
     jobs = {"E1": (experiments.run_E1, [fig_E1_matrix], report_E1),
             "E2": (experiments.run_E2, [fig_E2, fig_E2_population], report_E2),
             "E3": (experiments.run_E3, [fig_E3, fig_E3_named], report_E3),
+            "E4": (experiments.run_E4, [fig_E4, fig_E4_steady_states], report_E4),
             "E5": (experiments.run_E5, [fig_E5], report_E5),
-            "E6": (experiments.run_E6, [fig_E6], report_E6),
-            "E7": (experiments.run_E7, [fig_E7], report_E7)}
+            "E6": (experiments.run_E6, [fig_E6, fig_E6_advantage], report_E6)}
     for name in (jobs if which == "all" else [which]):
         run, panels, report = jobs[name]
         data = run(cfg)

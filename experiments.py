@@ -1,19 +1,10 @@
 """
-experiments.py - E1, E2, E3, E5, E6 and E7.
-
-    E5  population dynamics   replicator dynamics from a uniform start and
-                              from random starts; the stable state (section c)
-    E6  three criteria        initial viability, robustness and stability
-                              (the evaluation criteria listed in the assignment)
-    E7  genetic algorithm     evolve a new strategy against the fixed field,
-                              plus the memory-1 exhaustive cross-check
+experiments.py - E1, E2, E3, E4, E5 and E6.
 
 Every run_E* function returns a plain dictionary; every fig_E* function draws
 one figure on a given matplotlib Axes, so make_figures.py can combine them.
 All values come from config.json, and every random generator is seeded from
 cfg["seed"] plus the experiment number, so results can be reproduced.
-
-Usage:  python experiments.py E5      (or E6, E7, all)
 """
 
 import json
@@ -303,10 +294,10 @@ def run_E3(cfg):
 
 
 # ------------------------------------------
-# E5. Population dynamics
+# E4. Population dynamics
 # ------------------------------------------
-def run_E5(cfg):
-    rng = experiment_rng(cfg, 5)
+def run_E4(cfg):
+    rng = experiment_rng(cfg, 4)
     strategies = field_strategies()
     keys = [s.key for s in strategies]
     result = score_matrices([s.table for s in strategies], cfg, seed=rng.randrange(2**31))
@@ -320,7 +311,7 @@ def run_E5(cfg):
     rep = dict(cfg["replicator"])
     rep.pop("x0")
     random_runs = []
-    for _ in range(cfg["experiments"]["E5"]["n_random_starts"]):
+    for _ in range(cfg["experiments"]["E4"]["n_random_starts"]):
         x0 = random_shares(len(keys), rng)
         run = model.replicator_dynamics(A, x0=x0, **rep)
         random_runs.append({"x0": x0, "final": run["history"][-1],
@@ -330,7 +321,7 @@ def run_E5(cfg):
 
 
 # ------------------------------------------
-# E6. Initial viability, robustness, stability
+# E5. Initial viability, robustness, stability
 # ------------------------------------------
 def initial_viability(A, keys, invader_share, cfg):
     """Can strategy i get a foothold when it starts rare?
@@ -378,12 +369,12 @@ def robustness(A, tables, keys, cfg, rng):
                          shares strategy i survives (final share > threshold)
     3. leave one out:    best and worst rank when one other strategy is removed
     """
-    e6 = cfg["experiments"]["E6"]
+    e5 = cfg["experiments"]["E5"]
     include_self = cfg["ranking"]["include_self"]
     n = len(A)
     length = len(tables[0])
 
-    opponents = [random_table(length, rng) for _ in range(e6["n_random_opponents"])]
+    opponents = [random_table(length, rng) for _ in range(e5["n_random_opponents"])]
     vs_random = [candidate_fitness(t, opponents, cfg["game"], include_self=False,
                                    repeats=cfg["tournament"]["repeats"], rng=rng)
                  for t in tables]
@@ -391,10 +382,10 @@ def robustness(A, tables, keys, cfg, rng):
     rep = dict(cfg["replicator"])
     rep.pop("x0")
     survived = [0] * n
-    for _ in range(e6["n_random_starts"]):
+    for _ in range(e5["n_random_starts"]):
         final = model.replicator_dynamics(A, x0=random_shares(n, rng), **rep)["history"][-1]
         for i in range(n):
-            if final[i] > e6["survival_threshold"]:
+            if final[i] > e5["survival_threshold"]:
                 survived[i] += 1
 
     rank_range = []
@@ -445,9 +436,9 @@ def stability(A, keys, tol):
         out[key] = {"resisted": resisted, "neutral": neutral, "invaded_by": invaded_by}
     return out
 
-def run_E6(cfg):
-    rng = experiment_rng(cfg, 6)
-    e6 = cfg["experiments"]["E6"]
+def run_E5(cfg):
+    rng = experiment_rng(cfg, 5)
+    e5 = cfg["experiments"]["E5"]
     strategies = field_strategies()
     keys = [s.key for s in strategies]
     tables = [s.table for s in strategies]
@@ -455,29 +446,28 @@ def run_E6(cfg):
 
     return {
         "keys": keys,
-        "viability_field": initial_viability(A, keys, e6["invader_share"], cfg),
-        "viability_alld": viability_against_alld(tables, keys, e6["invader_share"], cfg, rng),
+        "viability_field": initial_viability(A, keys, e5["invader_share"], cfg),
+        "viability_alld": viability_against_alld(tables, keys, e5["invader_share"], cfg, rng),
         "robustness": robustness(A, tables, keys, cfg, rng),
-        "stability": stability(A, keys, e6["tie_tolerance"]),
-        "n_random_starts": e6["n_random_starts"],
+        "stability": stability(A, keys, e5["tie_tolerance"]),
+        "n_random_starts": e5["n_random_starts"],
     }
 
 
 # ------------------------------------------
-# E7. Genetic algorithm
+# E6. Genetic algorithm
 # ------------------------------------------
-def run_E7(cfg):
-    rng = experiment_rng(cfg, 7)
+def run_E6(cfg):
+    rng = experiment_rng(cfg, 6)
     strategies = field_strategies()
     keys = [s.key for s in strategies]
     field_tables = [s.table for s in strategies]
 
-    # several independent GA runs, each with its own seed
-    runs = []
-    for _ in range(cfg["ga"]["n_runs"]):
-        ga = GeneticAlgorithm(field_tables, cfg, seed=rng.randrange(2**31))
-        runs.append(ga.run())
-    best = max(runs, key=lambda r: r["best_fitness"])
+    # several independent GA runs; run 1 uses the config seed
+    # same run as the GUI, the other runs use seeds from the experiment generator
+    seeds = [cfg["seed"]] + [rng.randrange(2**31) for _ in range(cfg["ga"]["n_runs"] - 1)]
+    runs = [GeneticAlgorithm(field_tables, cfg, seed=s).run() for s in seeds]
+    best = max(runs, key=lambda r: r["best_fitness"])   
 
     # how does the evolved strategy do inside the field?
     tables = field_tables + [best["best_table"]]
@@ -497,12 +487,13 @@ def run_E7(cfg):
     }
 
     # cross-check: the GA with memory 1 must reach the best of all 32 tables
-    if cfg["experiments"]["E7"]["check_memory1_exhaustive"]:
+    if cfg["experiments"]["E6"]["check_memory1_exhaustive"]:
         exhaustive = exhaustive_search(field_tables, cfg, memory=1)
         ga_best = [GeneticAlgorithm(field_tables, cfg, seed=rng.randrange(2**31), memory=1).run()
-                   for _ in range(cfg["experiments"]["E7"]["memory1_runs"])]
+                   for _ in range(cfg["experiments"]["E6"]["memory1_runs"])]
         out["memory1_check"] = {
             "exhaustive_best": exhaustive[0],
+            "exhaustive_top3": exhaustive[:3],   # unique optimum
             "ga_best": [(r["best_fitness"], r["best_table"]) for r in ga_best],
             "passed": all(abs(r["best_fitness"] - exhaustive[0][0]) < 1e-9 for r in ga_best),
         }

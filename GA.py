@@ -1,6 +1,6 @@
 # The genetic algorith
 """
-GA.py - genetic algorithm that evolves a new rule table (Section b of the report).
+GA.py - genetic algorithm that evolves a new rule table
 
 The steps follow the assignment:
     0. Encoding        a strategy is its rule table, a string of "C"/"D"
@@ -34,7 +34,6 @@ def random_table(length, rng):
     return "".join(rng.choice((C, D)) for _ in range(length))
 
 def all_tables(memory):
-    # every possible rule table for a memory length (memory 1 -> 2**5 = 32 tables)
     length = table_length(memory)
     return ["".join(rows) for rows in itertools.product((C, D), repeat=length)]
 
@@ -102,19 +101,16 @@ class GeneticAlgorithm:
         self.length = table_length(self.memory)
         self.rng = random.Random(seed)
 
-        # without noise a table always gets the same fitness, so it is cached;
-        # with noise every evaluation is a new random sample
         self.use_cache = self.game["noise"] == 0
         self.cache = {}
 
         self.generation = 0
         self.best_table = None
         self.best_fitness = float("-inf")
-        self.stale = 0          # generations without improvement of the best
+        self.stale = 0                      # generations without improvement of the best
         self.history = []
 
-        # 1. initialization
-        self.population = [random_table(self.length, self.rng) for _ in range(self.pop_size)]
+        self.population = [random_table(self.length, self.rng) for _ in range(self.pop_size)]         # 1. initialization
         self.fitness = self.evaluate(self.population)
         self.record()
 
@@ -133,21 +129,17 @@ class GeneticAlgorithm:
         return scores
 
     def ranked(self):
-        # population indices, best first
-        return sorted(range(self.pop_size), key=lambda i: self.fitness[i], reverse=True)
+        return sorted(range(self.pop_size), key=lambda i: self.fitness[i], reverse=True)              # ranked by scores
 
     # -- variation -------------------------------------------------------
     def crossover(self, a, fa, b, fb):
-        if self.crossover_mode == "half":
-            # first half of the rows from one parent, second half from the other
+        if self.crossover_mode == "half":                                                             # first half of the rows from one parent, second half from the other
             cut = self.length // 2
             return a[:cut] + b[cut:]
         if self.crossover_mode == "uniform":
-            # every row from either parent with probability 1/2
-            return "".join(a[i] if self.rng.random() < 0.5 else b[i] for i in range(self.length))
-        # "fitness": the fitter parent passes on proportionally more rows
-        share_a = fa / (fa + fb) if fa + fb > 0 else 0.5
-        return "".join(a[i] if self.rng.random() < share_a else b[i] for i in range(self.length))
+            return "".join(a[i] if self.rng.random() < 0.5 else b[i] for i in range(self.length))     # every row from either parent with probability 1/2
+        share_a = fa / (fa + fb) if fa + fb > 0 else 0.5                                              # more weight on fitter parent
+        return "".join(a[i] if self.rng.random() < share_a else b[i] for i in range(self.length))     
 
     def mutate(self, table):
         rows = list(table)
@@ -163,14 +155,14 @@ class GeneticAlgorithm:
             return True
 
         order = self.ranked()
-        parents = order[:self.n_parents]                 # 2. selection
+        parents = order[:self.n_parents]                                      # 2. selection
         new_population = [self.population[i] for i in order[:self.n_elites]]  # elites survive unchanged
 
         while len(new_population) < self.pop_size:
-            i, j = self.rng.sample(parents, 2)           # two different parents
+            i, j = self.rng.sample(parents, 2)                                # two different parents
             child = self.crossover(self.population[i], self.fitness[i],
-                                   self.population[j], self.fitness[j])  # 3. crossover
-            new_population.append(self.mutate(child))    # 4. mutation
+                                   self.population[j], self.fitness[j])       # 3. crossover
+            new_population.append(self.mutate(child))                         # 4. mutation
 
         self.population = new_population
         self.fitness = self.evaluate(self.population)
@@ -192,14 +184,17 @@ class GeneticAlgorithm:
             "generation": self.generation,
             "best": self.fitness[best],
             "mean": sum(self.fitness) / self.pop_size,
-            "diversity": len(set(self.population)),   # number of different tables
+            "diversity": len(set(self.population)),                           # number of different tables
             "best_table": self.population[best],
         })
 
     def done(self):
         if self.generation >= self.max_generations:
             return True
-        return self.generation > 0 and self.stale >= self.patience
+        if self.generation > 0 and self.stale >= self.patience:
+            return True
+        else:
+            return False
 
     def run(self):
         while not self.step():
@@ -211,7 +206,7 @@ class GeneticAlgorithm:
             "best_table": self.best_table,
             "best_fitness": self.best_fitness,
             "generations": self.generation,
-            "converged": self.stale >= self.patience,   # False if max_generations was hit
+            "converged": self.stale >= self.patience,                         # False if max_generations was hit
             "history": self.history,
             "equals_field_strategy": self.best_table in self.field_tables,
         }
@@ -224,7 +219,7 @@ def exhaustive_search(field_tables, cfg, memory=1):
     """Fitness of every possible table (32 for memory 1), best first.
 
     The GA run with the same memory should find a table whose fitness equals
-    the best one here; this is the agreed cross-check for E7.
+    the best one here; this is the agreed cross-check for E6.
     """
     scored = []
     for table in all_tables(memory):
