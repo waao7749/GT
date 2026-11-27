@@ -1,7 +1,5 @@
-# functions for graph E0-E8
-
 """
-experiments.py - E5, E6 and E7.
+experiments.py - E1, E2, E3, E5, E6 and E7.
 
     E5  population dynamics   replicator dynamics from a uniform start and
                               from random starts; the stable state (section c)
@@ -74,6 +72,236 @@ def strategy_colors(keys, cfg):
     return colors
 
 
+def kendall_tau(a, b):
+    # rank the agreement of 2 score ranking lists: +1 same order, 0 unrelated, -1 reversed
+    n = len(a)
+    concordant, discordant = 0, 0
+    for i in range(n):
+        for j in range(i + 1, n):
+            s = (a[i] - a[j]) * (b[i] - b[j])
+            if s > 0:
+                concordant += 1
+            elif s < 0:
+                discordant += 1
+    return (concordant - discordant) / (n * (n - 1) / 2)
+
+def play_all_pairs(tables, rounds):
+    """Play every pair once WITHOUT noise and keep the move sequences.
+
+    moves[i][j] = (moves of i, moves of j) in the match i against j.
+    Without noise a match is fully determined by the two tables, and the
+    tables do not look at the payoffs or at the round number. So:
+      - the first N moves of a long match are exactly an N-round match (E2)
+      - the moves do not change when the payoff matrix changes (E3)
+    We therefore play once and only re-score, which is much faster.
+    """
+
+    n = len(tables)
+    moves = [[None] * n for _ in range(n)]
+
+    for i in range(n):
+        for j in range(i, n):
+            m = model.play_match(tables[i], tables[j], rounds)
+            moves[i][j] = (m["moves_a"], m["moves_b"])
+            moves[j][i] = (m["moves_b"], m["moves_a"])
+    return moves
+
+def outcome_counts(moves, rounds):
+    # counts[i][j] = how often (i,j) played CC, CD, DC, DD in the first `rounds` rounds
+    n = len(moves)
+    counts = [[None] * n for _ in range(n)]
+    for i in range(n):
+        for j in range(n):
+            a,b = moves[i][j][0][:rounds], moves[i][j][1][:rounds]
+            c = {"CC": 0, "CD": 0, "DC": 0, "DD": 0}
+            for x, y in zip (a, b):
+                c[x + y] += 1
+            counts[i][j] = c
+    return counts
+
+def matrices_from_counts(counts, payoffs, rounds):
+    """Score matrix A and mutual-cooperation matrix from the outcome counts.
+    A[i][j] = (R * CC + S * CD + T * DC + P * DD) / rounds, the same average
+    score per round that model.tournament returns.
+    """
+    n = len(counts)
+    A = [[0.0] * n for _ in range(n)]
+    mutual = [[0.0] * n for _ in range(n)]
+    for i in range(n):
+        for j in range(n):
+            c = counts[i][j]
+            total = (payoffs["R"] * c["CC"] + payoffs["S"] * c["CD"] + payoffs["T"] * c["DC"] + payoffs["P"] * c["DD"])
+            A[i][j] = total / rounds
+            mutual[i][j] = c["CC"] / rounds
+    return A, mutual
+
+def check_shortcut(tables, cfg, moves):
+    rounds = cfg["game"]["rounds"]
+    A_fast, _ = matrices_from_counts(outcome_counts(moves, rounds), cfg["game"]["payoffs"], rounds)
+    A_slow = score_matrices(tables, cfg, seed = 0)["average_score"]
+    diff = max(abs(A_fast[i][j] - A_slow[i][j]) for i in range(len(tables)) for j in range(len(tables)))
+
+    if diff > 1e-9:
+        raise RuntimeError(f"re-scoring differs from model.tournament by {diff}!")
+
+def needs_noise_free(cfg, name):
+    if cfg["game"].get("noise", 0) > 0:
+        raise ValueError("Noise is not 0.0, please check!")
+
+def population_outcome(A, mutual, cfg, threshold):
+    # replicator dynamics from the config start: steady-state summary
+    run = model.replicator_dynamics(A, **cfg["replicator"])
+    final = run["history"][-1]
+    return {"final": final,
+            "cooperation": population_cooperation(final, mutual),
+            "survivors": sum(1 for v in final if v > threshold),
+            "winner": max(range(len(final)), key = lambda i: final[i]),
+            "converged": run["converged"],
+            "generations": run["generations"]
+            }
+
+def game_type(T, S):
+    if T < 1 and S > 0:
+        return "harmony"
+    if T > 1 and S > 0:
+        return "snowdrift"
+    if T < 1 and S < 0:
+        return "stag hunt"
+    if T > 1 and S < 0:
+        return "prisoner's dilemma"
+    return "boundary"
+
+
+# ------------------------------------------
+# E1. Baseline Tournament: who is the strongest
+# ------------------------------------------
+def run_E1(cfg):
+    rng = experiment_rng(cfg, 1)
+    strategies = field_strategies()
+    keys = [s.key for s in strategies]
+    result = score_matrices([s.table for s in strategies], cfg, seed = rng.randrange(2 ** 31))
+    A, mutual = result["average_score"], result["mutual_cooperation"]
+
+    # ranking without self-play
+    scores = model.tournament_scores(A, cfg["ranking"]["include_self"])
+    ranking = model.ranking(keys, scores)
+    order = [keys.index(name) for _, name, _ in ranking]
+
+    return {"keys": keys,
+            "A": A,
+            "mutual": mutual,
+            "scores": scores,
+            "ranking": ranking,
+            "order": order,
+            "include_self": cfg["ranking"]["include_self"],}
+
+
+# ------------------------------------------
+# E2. Population dynamics: effect of encounters N
+# ------------------------------------------
+def run_E2(cfg):
+    needs_noise_free(cfg, "E2")
+    e2 = cfg["experiments"]["E2"]
+    strategies = field_strategies()
+    keys = [s.key for s in strategies]
+    tables = [s.table for s in strategies]
+    payoffs = cfg["game"]["payoffs"]
+    include_self = cfg["ranking"]["include_self"]
+
+    # play once at largest N, every shorter match is a prefix of it
+    rounds_list = sorted(e2["rounds_values"])
+    moves = play_all_pairs(tables, max(rounds_list + [cfg["game"]["rounds"]]))
+    check_shortcut(tables, cfg, moves)
+
+    per_n = []
+    for N in rounds_list:
+        A, mutual = matrices_from_counts(outcome_counts(moves, N), payoffs, N)
+        scores = model.tournament_scores(A, include_self)
+        pop = population_outcome(A, mutual, cfg, e2["survival_threshold"])
+        per_n.append({"N": N, "scores": scores, "ranking": model.ranking(keys, scores) , "population": pop})
+
+    # how similar is each ranking to the one at the default N
+    A0, _ = matrices_from_counts(outcome_counts(moves, cfg["game"]["rounds"]), payoffs, cfg["game"]["rounds"])
+    default_score = model.tournament_scores(A0, include_self)
+    for row in per_n:
+        row["tau_vs_default"] = kendall_tau(row["scores"], default_score)
+
+    # theory: TFT resists ALLD once N >= (T-P)/(R-P)
+    threshold = (payoffs["T"] - payoffs["P"]) / (payoffs["R"] - payoffs["P"])
+
+    # crossover N*: smallest N from which the stable population cooperates most of the time
+    crossover = None
+    for row in per_n:
+        if row["population"]["cooperation"] > 0.5:
+            crossover = row["N"]
+            break
+
+    return {"keys": keys,
+            "per_n": per_n,
+            "threshold": threshold ,
+            "crossover": crossover,
+            "default_rounds": cfg["game"]["rounds"]}
+
+
+# ------------------------------------------
+# E3. Effect of payoff matrices
+# ------------------------------------------
+def linspace(lo, hi, steps):
+    return [lo + (hi - lo) * k / (steps - 1) for k in range(steps)]
+
+def run_E3(cfg):
+    needs_noise_free(cfg, "E3")
+    e3 = cfg["experiments"]["E3"]
+    strategies = field_strategies()
+    keys = [s.key for s in strategies]
+    tables = [s.table for s in strategies]
+    rounds = cfg["game"]["rounds"]
+    include_self = cfg["ranking"]["include_self"]
+
+    # the moves do not depend on the payoffs: pl
+    moves = play_all_pairs(tables, rounds)
+    check_shortcut(tables, cfg, moves)
+    counts = outcome_counts(moves, rounds)
+
+    # E3a: (T, S) plane with R = 1 and P = 0
+    Ts = linspace(*e3["T_range"], e3["steps"])
+    Ss = linspace(*e3["S_range"], e3["steps"])
+    cooperation = [[0.0] * len(Ts) for _ in Ss]       # rows: S, columns: T
+    survivors = [[0] * len(Ts) for _ in Ss]
+    winner = [[""] * len(Ts) for _ in Ss]
+    by_type = {}
+    for r, S in enumerate(Ss):
+        for c, T in enumerate(Ts):
+            A, mutual = matrices_from_counts(counts, {"T": T, "R": 1.0, "P": 0.0, "S": S}, rounds)
+            pop = population_outcome(A, mutual, cfg, e3["survival_threshold"])
+            cooperation[r][c] = pop["cooperation"]
+            survivors[r][c] = pop["survivors"]
+            winner[r][c] = keys[pop["winner"]]
+            by_type.setdefault(game_type(T, S), []).append(pop["cooperation"])
+    type_summary = {g: {"cells": len(v), "mean_cooperation": sum(v) / len(v),
+                        "min_cooperation": min(v)} for g, v in by_type.items()}
+
+    # E3b: three concrete matrices, compared with the Axelrod ranking
+    named = {}
+    for name, payoffs in e3["named_payoffs"].items():
+        A, mutual = matrices_from_counts(counts, payoffs, rounds)
+        scores = model.tournament_scores(A, include_self)
+        pop = population_outcome(A, mutual, cfg, e3["survival_threshold"])
+        named[name] = {"payoffs": payoffs, "scores": scores,
+                       "ranking": model.ranking(keys, scores),
+                       "is_pd": model.is_prisoners_dilemma(payoffs),
+                       "alternating_beats_mutual_C": payoffs["T"] + payoffs["S"] > 2 * payoffs["R"],
+                       "population": pop}
+    reference = next(iter(named))
+    for name in named:
+        named[name]["tau_vs_reference"] = kendall_tau(named[name]["scores"],
+                                                      named[reference]["scores"])
+
+    return {"keys": keys, "Ts": Ts, "Ss": Ss, "cooperation": cooperation,
+            "survivors": survivors, "winner": winner, "type_summary": type_summary,
+            "named": named, "reference": reference}
+
+
 # ------------------------------------------
 # E5. Population dynamics
 # ------------------------------------------
@@ -99,18 +327,6 @@ def run_E5(cfg):
                             "generations": run["generations"], "converged": run["converged"]})
 
     return {"keys": keys, "A": A, "uniform": uniform, "random_runs": random_runs}
-
-def fig_E5(data, ax, cfg):
-    # shares over the generations from the uniform start
-    colors = strategy_colors(data["keys"], cfg)
-    history = data["uniform"]["history"]
-    for i, key in enumerate(data["keys"]):
-        ax.plot([x[i] for x in history], label=key, color=colors[key],
-                linewidth=2.2 if key == "TFT" else 1.4)
-    ax.set_xlabel("generation")
-    ax.set_ylabel("population share")
-    ax.set_title("E5: replicator dynamics from a uniform start")
-    ax.legend(ncol=2, fontsize=8, frameon=False)
 
 
 # ------------------------------------------
@@ -246,19 +462,6 @@ def run_E6(cfg):
         "n_random_starts": e6["n_random_starts"],
     }
 
-def fig_E6(data, ax, cfg):
-    # one panel: survival frequency (robustness) against growth when rare (viability)
-    colors = strategy_colors(data["keys"], cfg)
-    for key in data["keys"]:
-        x = data["viability_field"][key]["growth"]
-        y = data["robustness"][key]["survived"] / data["n_random_starts"]
-        ax.scatter(x, y, color=colors[key], s=40)
-        ax.annotate(key, (x, y), textcoords="offset points", xytext=(4, 3), fontsize=8)
-    ax.axvline(1.0, color="grey", linewidth=0.8, linestyle="--")
-    ax.set_xlabel("growth factor when rare (initial viability)")
-    ax.set_ylabel("share of random starts survived (robustness)")
-    ax.set_title("E6: viability and robustness")
-
 
 # ------------------------------------------
 # E7. Genetic algorithm
@@ -304,75 +507,3 @@ def run_E7(cfg):
             "passed": all(abs(r["best_fitness"] - exhaustive[0][0]) < 1e-9 for r in ga_best),
         }
     return out
-
-def fig_E7(data, ax, cfg):
-    # best and mean fitness per generation for every run
-    for k, run in enumerate(data["runs"]):
-        gens = [h["generation"] for h in run["history"]]
-        ax.plot(gens, [h["best"] for h in run["history"]], color="tab:blue", alpha=0.6,
-                linewidth=1, label="best" if k == 0 else None)
-        ax.plot(gens, [h["mean"] for h in run["history"]], color="tab:orange", alpha=0.4,
-                linewidth=1, label="mean" if k == 0 else None)
-    ax.set_xlabel("generation")
-    ax.set_ylabel("fitness (score per round vs fixed field)")
-    ax.set_title(f"E7: genetic algorithm, {len(data['runs'])} runs")
-    ax.legend(frameon=False)
-
-
-# ------------------------------------------
-# Command line
-# ------------------------------------------
-def save_figure(draw, data, cfg, name):
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    out_dir = Path(__file__).with_name(cfg["figures"]["out_dir"])
-    out_dir.mkdir(exist_ok=True)
-    fig, ax = plt.subplots(figsize=(7, 4.5))
-    draw(data, ax, cfg)
-    fig.tight_layout()
-    path = out_dir / f"{name}.png"
-    fig.savefig(path, dpi=cfg["figures"]["dpi"])
-    plt.close(fig)
-    return path
-
-def report_E5(data):
-    u = data["uniform"]
-    print(f"E5 uniform start: converged = {u['converged']} after {u['generations']} generations")
-    for key, share in zip(data["keys"], u["history"][-1]):
-        print(f"   {key:4s} {share:.3f}")
-    print(f"   population mutual cooperation: {u['cooperation'][-1]:.3f}")
-    not_conv = sum(not r["converged"] for r in data["random_runs"])
-    print(f"   random starts: {len(data['random_runs'])} runs, {not_conv} did not converge")
-
-def report_E6(data):
-    print("E6  key  growth(field) growth(ALLD) vsRandom survived rank   resisted/neutral/invaded")
-    for key in data["keys"]:
-        v, a = data["viability_field"][key], data["viability_alld"][key]
-        r, s = data["robustness"][key], data["stability"][key]
-        print(f"    {key:4s} {v['growth']:.3f}         {a['growth']:.3f}        "
-              f"{r['vs_random_tables']:.3f}    {r['survived']:2d}/{data['n_random_starts']}  "
-              f"{r['rank_best']}-{r['rank_worst']}  "
-              f"{len(s['resisted'])}/{len(s['neutral'])}/{len(s['invaded_by'])}")
-
-def report_E7(data):
-    print(f"E7 best table {data['best_table']}  fitness {data['best_fitness']:.3f}  "
-          f"(same as a field strategy: {data['equals_field_strategy']})")
-    for rank, name, score in data["ranking"][:5]:
-        print(f"   {rank:2d}. {name:4s} {score:.3f}")
-    print(f"   final share of GA strategy: {data['final_shares']['GA']:.3f}")
-    if "memory1_check" in data:
-        m1 = data["memory1_check"]
-        print(f"   memory-1 check passed = {m1['passed']}  exhaustive best {m1['exhaustive_best']}")
-
-if __name__ == "__main__":
-    cfg = load_config()
-    which = sys.argv[1] if len(sys.argv) > 1 else "all"
-    jobs = {"E5": (run_E5, fig_E5, report_E5),
-            "E6": (run_E6, fig_E6, report_E6),
-            "E7": (run_E7, fig_E7, report_E7)}
-    for name in (jobs if which == "all" else [which]):
-        run, fig, report = jobs[name]
-        data = run(cfg)
-        report(data)
-        print("   figure:", save_figure(fig, data, cfg, name))
